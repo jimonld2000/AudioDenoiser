@@ -27,10 +27,7 @@ try {
     }
     
     Write-Output "Step 3: Moving all files from $unzipDestination to $trainCleanDir"
-    Get-ChildItem -Path $unzipDestination -Recurse -File | ForEach-Object {
-        Move-Item -Path $_.FullName -Destination $trainCleanDir
-        Write-Output "Moved file: $($_.Name)"
-    }
+    Get-ChildItem -Path $unzipDestination -Recurse -File | Where-Object { $_.Extension -eq ".wav" }| Copy-Item -Destination $trainCleanDir
     Write-Output "All files have been moved to $trainCleanDir."
     
     #---------------------------------------------------
@@ -46,35 +43,82 @@ try {
     }
     
     #---------------------------------------------------
-    # Step 5: Randomly copy 5 files to create a test dataset
+    # Step 5: Move some random files into the test folder
+    # Absolute paths to source and destination directories
     $sourceDir = ".\data\train\clean"
     $destDir   = ".\data\test\clean"
-    
+
     Write-Output "Step 5: Preparing test dataset by selecting random files from $sourceDir"
-    
+
+    # Check if the source directory exists
+    if (-not (Test-Path -Path $sourceDir)) {
+        Write-Error "Source directory does not exist: $sourceDir"
+        exit
+    }
+
     # Create the destination directory if it doesn't exist
     if (-not (Test-Path -Path $destDir)) {
-        New-Item -ItemType Directory -Path $destDir | Out-Null
+        New-Item -ItemType Directory -Path $destDir -Force | Out-Null
         Write-Output "Created test destination directory: $destDir"
     }
-    
+
     # Get all files from the source directory
     $allFiles = Get-ChildItem -Path $sourceDir -File
     if ($allFiles.Count -lt 5) {
-        Write-Error "Not enough files in $sourceDir (found $($allFiles.Count) files). Exiting."
+        Write-Error "Not enough files in $sourceDir (found $($allFiles.Count) file(s)). Exiting."
         exit
     }
-    
+
     # Shuffle and select 5 random files
     $randomFiles = $allFiles | Get-Random -Count 5
+    Write-Output "Selected random files: $($randomFiles.Name -join ', ')"
+
+    # Move selected files to the destination directory
     foreach ($file in $randomFiles) {
         $destPath = Join-Path -Path $destDir -ChildPath $file.Name
-        Move-Item -Path $file.FullName -Destination $destPath
-        Write-Output "Moved file to test dataset: $($file.Name)"
+        Move-Item -literalpath $file.FullName -Destination $destPath -Force
+        Write-Output "Moved file to test dataset: $($file.FullName) -> $destPath"
     }
+
+    # Verify moved files
+    Write-Output "Verifying moved files in $($destDir):"
+    Get-ChildItem -Path $destDir -File | ForEach-Object {
+        Write-Output "File found: $($_.FullName)"
+    }
+
     Write-Output "Step 5 complete: Test dataset created in $destDir."
-    
-    Write-Output "All steps completed successfully."
+
+    # Step 6: Create a virtual environment and activate it
+    Write-Output "Step 6: Creating a virtual environment."
+    $venvDir = ".\venv"
+    if (-not (Test-Path -Path $venvDir)) {
+        python -m venv $venvDir
+        Write-Output "Virtual environment created at $venvDir"
+    } else {
+        Write-Output "Virtual environment already exists at $venvDir"
+    }
+
+    Write-Output "Activating the virtual environment."
+    $activateScript = Join-Path -Path $venvDir -ChildPath "Scripts\Activate.ps1"
+    if (-not (Test-Path -Path $activateScript)) {
+        Write-Error "Activation script not found: $activateScript"
+        exit
+    }
+    & $activateScript
+    Write-Output "Virtual environment activated."
+
+    # Step 7: Install pip requirements
+    Write-Output "Step 7: Installing pip requirements."
+    $requirementsFile = ".\requirements.txt"
+    if (-not (Test-Path -Path $requirementsFile)) {
+        Write-Error "Requirements file not found: $requirementsFile"
+        exit
+    }
+    pip install -r $requirementsFile
+    Write-Output "Pip requirements installed successfully."
+
+    Write-Output "--------------\nAll steps completed successfully. You can test the model now or retrain it as per choice!"
+
 }
 catch {
     Write-Error "An error occurred: $_"

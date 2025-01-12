@@ -8,6 +8,8 @@ from tqdm import tqdm
 from data_loader import SpectrogramDataset  # Your existing dataset class
 from model import UNet  # Your UNet
 
+from torch.utils.tensorboard import SummaryWriter
+
 # Paths and Parameters
 DATA_DIR = "./data/train_processed"  # Directory that has subfolders: white/, urban/, reverb/, noise_cancellation/
 SAVE_DIR = "./saved_models"          # Where we'll save each noise-specific UNet
@@ -89,8 +91,8 @@ def train_for_noise_type(noise_type):
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
     # Initialize a fresh UNet
+    writer = SummaryWriter(f"torchlogs/model_{noise_type}/")
     model = UNet(in_channels=1, num_classes=1).to(DEVICE)
-    summary(model, input_size=(1, 256, 64))
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
@@ -109,6 +111,9 @@ def train_for_noise_type(noise_type):
             best_val_loss = val_loss
             torch.save(model.state_dict(), best_model_path)
             print(f"Saved best model for {noise_type} at epoch {epoch+1}")
+            writer.add_graph(model, verbose=True)
+            writer.close()
+        
 
     print(f"=== Finished training {noise_type}. Best Val Loss: {best_val_loss:.6f} ===")
 

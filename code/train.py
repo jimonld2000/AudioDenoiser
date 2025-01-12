@@ -90,6 +90,7 @@ def train_for_noise_type(noise_type):
 
     # Initialize a fresh UNet
     model = UNet(in_channels=1, num_classes=1).to(DEVICE)
+    summary(model, input_size=(1, 256, 64))
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 

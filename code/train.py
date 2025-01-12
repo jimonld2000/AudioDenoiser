@@ -5,7 +5,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 
-from data_loader_ensemble import SpectrogramDataset  # Your existing dataset class
+from data_loader import SpectrogramDataset  # Your existing dataset class
 from model import UNet  # Your UNet
 
 # Paths and Parameters

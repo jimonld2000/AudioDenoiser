@@ -31,6 +31,15 @@ The first step would be to activate the venv which has the modules installed:
 .\venv\Scripts\activate
 ```
 
+After this, the datasets need to be created (which means converting the .wav audio files into the processsed .npy spectrogram form we use in the project).
+For this the next scripts must be ran:
+```
+python -u .\code\create_train_dataset.py
+```
+```
+python -u .\code\create_test_dataset.py
+```
+After these, you can train/test the models
 ### Training
 You can run a new training by just running the training script:
 ```

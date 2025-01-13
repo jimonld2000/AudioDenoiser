@@ -43,7 +43,7 @@ After these, you can train/test the models
 ### Training
 You can run a new training by just running the training script:
 ```
-python -u .\code\training.py
+python -u .\code\train.py
 ```
 ### Testing the models
 You can run a new test by just running the testing script:

@@ -30,7 +30,7 @@ HOP_LENGTH = 128
 NUM_DEBUG_WAV = 2
 
 # Desired SNR in dB for “white” and “urban”
-SNR_DB = 5.0
+SNR_DB = 8.0 #5 is too big, 10 is too small 
 
 # Our noise types
 NOISE_TYPES = ["white", "urban", "reverb", "noise_cancellation"]
@@ -91,10 +91,10 @@ def pedalboard_reverb(clean_audio):
     """
     # Create a pedalboard with a single Reverb effect
     board = Pedalboard([
-        Reverb(room_size=0.9, damping=0.9, wet_level=0.33)
+        Reverb(room_size=0.9, damping=0.9, wet_level=0.33) # Values were chosen based on try and error
     ])
 
-    # Pedalboard expects shape (channels, samples). We'll assume mono audio => shape (1, num_samples)
+    # Pedalboard expects shape (channels, samples). Let's choose mono so => shape (1, num_samples)
     mono_chunk = np.expand_dims(clean_audio, axis=0)
     # Apply the board
     effected = board(mono_chunk, SAMPLE_RATE)
@@ -168,7 +168,7 @@ def audio_to_magnitude_spectrogram(audio_1d):
         audio_1d,
         n_fft=N_FFT,
         hop_length=HOP_LENGTH,
-        center=False  # avoid padding
+        center=False  # avoid padding, so the dimensions match exactly
     )
     mag, _ = librosa.magphase(stft_complex)
     return mag  # shape ~ (257, 63) for 2s chunk, depends on hop/N_FFT

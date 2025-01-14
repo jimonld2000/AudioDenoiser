@@ -10,7 +10,7 @@ from pedalboard import Pedalboard, Reverb
 # ------------------------
 CLEAN_AUDIO_DIR = "./data/test/clean"
 NOISE_DIR = "./data/test/noise"
-IMPULSE_RESPONSE_PATH = "./data/reverb/example_reverb.wav"
+# IMPULSE_RESPONSE_PATH = "./data/reverb/example_reverb.wav"
 OUTPUT_DIR = "./data/test_processed"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -138,11 +138,7 @@ def process_test_audio(clean_files, noise_files, noise_type):
     for clean_file in clean_files:
         y_clean, _ = librosa.load(clean_file, sr=SAMPLE_RATE)
 
-        # y_clean is the entire 2-second audio (assuming your test data is 2s each)
-        # Instead of splitting, handle the entire signal in one pass
-
-        # create the noisy version:
-        # (assuming you have a function add_noise(...) - same as you had)
+        # y_clean is the entire 2-second audio
         noise_file = np.random.choice(
             noise_files) if noise_type == "urban" else None
         noise, _ = librosa.load(

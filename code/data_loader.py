@@ -2,7 +2,7 @@ import os
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-import librosa
+
 
 class SpectrogramDataset(Dataset):
     """
@@ -51,7 +51,7 @@ class SpectrogramDataset(Dataset):
 
         return noisy, clean
 
-    def _pad_or_truncate(self, data, target_size=(256, 64)):
+    def _pad_or_truncate(self, data, target_size=(256, 64)): # NEed this to ensure the shape of the training data
         target_h, target_w = target_size
         h, w = data.shape
 

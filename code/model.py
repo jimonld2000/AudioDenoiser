@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
+# Define the U-Net model
+# Double convolutional layer
 class DoubleConvLayer(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
@@ -12,13 +13,13 @@ class DoubleConvLayer(nn.Module):
             nn.ReLU(inplace=True),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
             nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
+            nn.ReLU(inplace=True), # Could be used leaky ReLU here
         )
 
     def forward(self, x):
         return self.double_conv(x)
 
-
+# Downsample and upsample layers
 class DownSampleLayer(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
@@ -43,7 +44,7 @@ class UpSampleLayer(nn.Module):
         diff_y = x2.size()[2] - x1.size()[2]
         diff_x = x2.size()[3] - x1.size()[3]
         x1 = F.pad(x1, [diff_x // 2, diff_x - diff_x // 2,
-                        diff_y // 2, diff_y - diff_y // 2])
+                        diff_y // 2, diff_y - diff_y // 2]) # NEeded in case of mismatch (it could happen a lot...)
         # Concatenate and convolve
         x = torch.cat([x2, x1], dim=1)
         return self.conv(x)
@@ -64,7 +65,7 @@ class UNet(nn.Module):
         self.upconv3 = UpSampleLayer(256, 128)
         self.upconv4 = UpSampleLayer(128, 64)
 
-        self.out = nn.Conv2d(in_channels=64, out_channels=num_classes, kernel_size=1)
+        self.out = nn.Conv2d(in_channels=64, out_channels=num_classes, kernel_size=1) # back to 64 channels
 
     def forward(self, x):
        # print(f"Input shape: {x.shape}")  # Debug input shape

@@ -19,11 +19,11 @@ SAMPLE_RATE = 8000
 N_FFT = 512
 HOP_LENGTH_FFT = 128
 
-# Match the noise types you used for training
+# Match the noise types for training
 NOISE_TYPES = ["white", "urban", "reverb", "noise_cancellation"]
 
 # --------------------------------------------------
-# Griffin-Lim Reconstruction
+# Griffin-Lim Reconstruction 
 # --------------------------------------------------
 def griffin_lim_reconstruction(magnitude_spectrogram, n_fft, hop_length, iterations=50):
     """
@@ -36,13 +36,13 @@ def griffin_lim_reconstruction(magnitude_spectrogram, n_fft, hop_length, iterati
     complex_spec = magnitude_spectrogram * angles
 
     for _ in range(iterations):
-        audio = librosa.istft(complex_spec, hop_length=hop_length)
-        new_complex_spec = librosa.stft(
+        audio = librosa.istft(complex_spec, hop_length=hop_length) # Inverse STFT
+        new_complex_spec = librosa.stft( # STFT
             audio, n_fft=n_fft, hop_length=hop_length
         )
         magnitude = np.abs(new_complex_spec)
         phase = np.angle(new_complex_spec)
-        complex_spec = magnitude * np.exp(1j * phase)
+        complex_spec = magnitude * np.exp(1j * phase) # Estimated complex spectrogram
 
     return librosa.istft(complex_spec, hop_length=hop_length)
 
@@ -60,7 +60,7 @@ def load_model_for_noise(noise_type):
         raise FileNotFoundError(f"Model file not found: {model_path}")
 
     model = UNet(in_channels=1, num_classes=1)
-    # Depending on your PyTorch version/model saving you might not need "weights_only=True"
+    # Weights only is recommended for loading on CPU
     model.load_state_dict(torch.load(model_path, map_location='cpu', weights_only=True))
     model.eval()
     print(f"Loaded model for noise type '{noise_type}' from: {model_path}")
@@ -167,7 +167,7 @@ if __name__ == "__main__":
     print("Starting specialized test for each noise type...")
 
     for noise_type in NOISE_TYPES:
-        # 1) Load the specialized model
+        # 1) Load the specialized model (if available)
         try:
             model = load_model_for_noise(noise_type)
         except FileNotFoundError:

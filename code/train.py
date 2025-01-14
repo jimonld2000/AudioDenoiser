@@ -5,32 +5,32 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 
-from data_loader import SpectrogramDataset  # Your existing dataset class
-from model import UNet  # Your UNet
+from data_loader import SpectrogramDataset  # The existing dataset class
+from model import UNet  # Our UNet
 
 from torch.utils.tensorboard import SummaryWriter
 
 # Paths and Parameters
 DATA_DIR = "./data/train_processed"  # Directory that has subfolders: white/, urban/, reverb/, noise_cancellation/
-SAVE_DIR = "./saved_models"          # Where we'll save each noise-specific UNet
+SAVE_DIR = "./saved_models"          # Where it's saved each noise-specific UNet
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 BATCH_SIZE = 8
 EPOCHS = 20
-LEARNING_RATE = 3e-4
+LEARNING_RATE = 3e-4 # Thank you Andrej Karpathy for the tip
 VALIDATION_SPLIT = 0.1
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu") # GPU if available, STEPS in the readme
 
 NOISE_TYPES = ["white", "urban", "reverb", "noise_cancellation"]
 
-class CombinedLoss(nn.Module):
-    def __init__(self):
-        super(CombinedLoss, self).__init__()
-        self.mse = nn.MSELoss()
-        self.l1 = nn.L1Loss()
+# class CombinedLoss(nn.Module):            # Initally thought of combining L1 and MSE loss, bad idea tho
+#     def __init__(self):
+#         super(CombinedLoss, self).__init__()
+#         self.mse = nn.MSELoss()
+#         self.l1 = nn.L1Loss()
 
-    def forward(self, output, target):
-        return self.mse(output, target) + self.l1(output, target)
+#     def forward(self, output, target):
+#         return self.mse(output, target) + self.l1(output, target)
 
 
 def train_one_epoch(model, dataloader, criterion, optimizer):
@@ -71,7 +71,7 @@ def train_for_noise_type(noise_type):
 
     # Create dataset that only loads data from the subdirectory corresponding to `noise_type`
     noise_subdir = os.path.join(DATA_DIR, noise_type)
-    # We'll create a small wrapper or a specialized dataset init that only scans `noise_subdir`.
+    # Small wrappet that only scans `noise_subdir`.
     
     dataset = SpectrogramDataset(noise_subdir)  # This loads only from that folder
     print(f"Total dataset size ({noise_type}): {len(dataset)}")
@@ -119,7 +119,7 @@ def train_for_noise_type(noise_type):
 
 
 if __name__ == "__main__":
-    # We'll train a separate model for each noise type
+    #  separate model for each noise type
     for nt in NOISE_TYPES:
         train_for_noise_type(nt)
     

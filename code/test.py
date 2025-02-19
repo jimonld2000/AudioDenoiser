@@ -6,6 +6,7 @@ import soundfile as sf
 import matplotlib.pyplot as plt
 
 from model import UNet
+from loss import CombinedPerceptualLoss
 
 # --------------------------------------------------
 # Paths & Parameters
@@ -113,14 +114,28 @@ def test_single_noise_type(model, noise_type, test_data_dir, output_dir):
         denoised_spectrograms = denoised_torch.squeeze(1).cpu().numpy()
         # shape => (N, freq_bins, time_frames)
 
-    # Compute the Mean Squared Error (MSE) between denoised and clean spectrograms.
-    mse = np.mean((denoised_spectrograms - clean_spectrograms) ** 2)
-    print(f"MSE for noise type '{noise_type}': {mse:.6f}")
+    # Compute perceptual losses between denoised and clean spectrograms
+    criterion = CombinedPerceptualLoss()
+    with torch.no_grad():
+        denoised_torch = torch.tensor(denoised_spectrograms, dtype=torch.float32).unsqueeze(1)
+        clean_torch = torch.tensor(clean_spectrograms, dtype=torch.float32).unsqueeze(1)
+        total_loss, stft_loss, mel_loss, l1_loss = criterion(denoised_torch, clean_torch)
 
-    # Optionally: Save the MSE value to a text file
-    mse_file_path = os.path.join(output_dir, f"{noise_type}_mse.txt")
-    with open(mse_file_path, "w") as f:
-        f.write(f"MSE for noise type '{noise_type}': {mse:.6f}\n")
+    # Print all loss metrics
+    print(f"\nLoss metrics for noise type '{noise_type}':")
+    print(f"Total Loss: {total_loss.item():.6f}")
+    print(f"STFT Loss: {stft_loss.item():.6f}")
+    print(f"Mel Loss: {mel_loss.item():.6f}")
+    print(f"L1 Loss: {l1_loss.item():.6f}")
+
+    # Save all metrics to a text file
+    metrics_file_path = os.path.join(output_dir, f"{noise_type}_metrics.txt")
+    with open(metrics_file_path, "w") as f:
+        f.write(f"Perceptual metrics for noise type '{noise_type}':\n")
+        f.write(f"Total Loss: {total_loss.item():.6f}\n")
+        f.write(f"STFT Loss: {stft_loss.item():.6f}\n")
+        f.write(f"Mel Loss: {mel_loss.item():.6f}\n")
+        f.write(f"L1 Loss: {l1_loss.item():.6f}\n")
 
     # Reconstruct & save denoised audio for a few samples
     for i, denoised_spec in enumerate(denoised_spectrograms):
@@ -137,22 +152,22 @@ def test_single_noise_type(model, noise_type, test_data_dir, output_dir):
         plt.figure(figsize=(12, 6))
 
         # Noisy spectrogram
-        plt.subplot(1, 3, 1)
-        plt.title("Noisy Spectrogram")
-        plt.imshow(noisy_spectrograms[i], aspect='auto', origin='lower', cmap='magma')
-        plt.colorbar()
+        # Plot spectrograms directly with dB scale and fixed range
+        def plot_spectrogram(spec, title, pos):
+            plt.subplot(1, 3, pos)
+            plt.title(title)
+            # Convert to dB with reference level
+            #spec_db = 20 * np.log10(np.maximum(spec, 1e-6))
+            # Set fixed dB range for visualization
+            #vmin, vmax = -100, 0  # Fixed range for darker background
+            plt.imshow(spec, aspect='auto', origin='lower', 
+                      cmap='magma')
+            plt.colorbar(format='%+2.0f dB')
 
-        # Denoised spectrogram
-        plt.subplot(1, 3, 2)
-        plt.title("Denoised Spectrogram")
-        plt.imshow(denoised_spectrograms[i], aspect='auto', origin='lower', cmap='magma')
-        plt.colorbar()
-
-        # Clean spectrogram
-        plt.subplot(1, 3, 3)
-        plt.title("Clean Spectrogram")
-        plt.imshow(clean_spectrograms[i], aspect='auto', origin='lower', cmap='magma')
-        plt.colorbar()
+        # Plot all three spectrograms
+        plot_spectrogram(noisy_spectrograms[i], "Noisy Spectrogram", 1)
+        plot_spectrogram(denoised_spectrograms[i], "Denoised Spectrogram", 2)
+        plot_spectrogram(clean_spectrograms[i], "Clean Spectrogram", 3)
 
         plt.tight_layout()
         plt.savefig(os.path.join(
@@ -172,6 +187,7 @@ if __name__ == "__main__":
             model = load_model_for_noise(noise_type)
         except FileNotFoundError:
             print(f"Model for noise type '{noise_type}' not found. Skipping.")
+            print(f"Model for noise type '{noise_type}' not found. Skipping.")
             continue
 
         # 2) Test on corresponding test data
@@ -181,5 +197,3 @@ if __name__ == "__main__":
             test_data_dir=TEST_DATA_DIR,
             output_dir=OUTPUT_DIR
         )
-
-    print("All done!")

@@ -9,7 +9,7 @@ joblib==1.4.2
 lazy_loader==0.4
 librosa==0.10.2.post1
 llvmlite==0.43.0
-mkl-service==2.4.0
+mkl-service
 msgpack==1.1.0
 numba==0.60.0
 numpy
@@ -44,4 +44,4 @@ torchvision
 torchaudio
 pedalboard
 torchsummary
-pypesq
+pesq

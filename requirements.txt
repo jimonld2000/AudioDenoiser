@@ -44,3 +44,4 @@ torchvision
 torchaudio
 pedalboard
 torchsummary
+pypesq

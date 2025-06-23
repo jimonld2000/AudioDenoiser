@@ -7,7 +7,7 @@ import numpy as np
 import soundfile as sf
 import matplotlib.pyplot as plt
 from pesq import pesq
-from stoi import stoi
+from pystoi import stoi
 
 from model import UNet
 

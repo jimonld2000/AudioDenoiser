@@ -16,7 +16,7 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 
 BATCH_SIZE = 8
 EPOCHS = 20
-LEARNING_RATE = 3e-4
+LEARNING_RATE = 1e-4
 VALIDATION_SPLIT = 0.1
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 NOISE_TYPES = ["white", "urban", "reverb", "noise_cancellation"]
@@ -41,6 +41,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, writer, epoch):
         loss, stft_loss, mel_loss, l1_loss = criterion(outputs, clean)
         
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
         # Accumulate losses

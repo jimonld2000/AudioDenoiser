@@ -1,4 +1,4 @@
-# code/create_test_dataset.py (Final Corrected Version)
+# code/create_test_dataset.py (44.1kHz Version)
 
 import os
 import glob
@@ -8,15 +8,19 @@ import soundfile as sf
 from pedalboard import Pedalboard, Reverb
 from pydub import AudioSegment
 
-# --- Configuration ---
+# --- Configuration for 44.1kHz ---
 TEST_DATA_DIR_RAW = "./data/test/clean"
 TEST_DATA_DIR_PROCESSED = "./data/test_processed"
 URBAN_SOUND_DIR = "./data/test/noise"
-SAMPLE_RATE = 8000
-AUDIO_SECONDS = 2 # Adjusted to match your files (16000 samples / 8000 Hz)
-N_FFT = 255
-HOP_LENGTH_FFT = 63
+SAMPLE_RATE = 44100  # CHANGED
+AUDIO_SECONDS = 2
 SNR_DB = 8.0
+
+# --- FFT Parameters calculated to maintain model input shape (256, 64) ---
+# Height: (N_FFT / 2) + 1 = 256  => N_FFT = 510
+# Width: (AUDIO_SECONDS * SAMPLE_RATE) / HOP_LENGTH ≈ 64 => HOP_LENGTH = 1400
+N_FFT = 510          # CHANGED
+HOP_LENGTH = 1400    # CHANGED
 
 os.makedirs(TEST_DATA_DIR_PROCESSED, exist_ok=True)
 
@@ -43,37 +47,35 @@ def add_noise(clean_audio, noise, snr_db):
 
 def pedalboard_reverb(audio, sample_rate):
     board = Pedalboard([Reverb(room_size=0.9, damping=0.9, wet_level=0.33)])
-    return board(audio, sample_rate)
+    return board(audio.astype(np.float32), sample_rate) # Ensure float32 for pedalboard
 
-def noise_cancellation_effect(audio):
-    """
-    Applies a low-pass filter and ensures the output is float32.
-    """
+def noise_cancellation_effect(audio, sample_rate):
+    """Applies a low-pass filter using pydub."""
     # pydub works with integers, so we need to convert from float
-    # Assuming input 'audio' is float32 in [-1.0, 1.0]
     int_audio = (audio * 32767).astype(np.int16)
 
     segment = AudioSegment(
-        int_audio.tobytes(), frame_rate=SAMPLE_RATE,
+        int_audio.tobytes(), frame_rate=sample_rate,
         sample_width=int_audio.dtype.itemsize, channels=1
     )
+    # The effect of a 2000Hz filter is different at 44.1kHz than 8kHz, but it's a valid effect.
     low_passed = segment.low_pass_filter(2000)
     
-    # --- FIX ---
-    # Convert back to a numpy array of integers
     processed_int_array = np.array(low_passed.get_array_of_samples())
-    # Convert back to float32 and normalize to [-1.0, 1.0]
     processed_float_array = processed_int_array.astype(np.float32) / 32768.0
     return processed_float_array
 
 def process_test_audio(clean_file_path, noise_type, noise_samples):
     try:
-        clean_audio, _ = librosa.load(clean_file_path, sr=SAMPLE_RATE, duration=AUDIO_SECONDS, res_type='kaiser_fast')
+        # Load original files at their native rate, then resample.
+        # This provides the best quality for resampling.
+        clean_audio, original_sr = librosa.load(clean_file_path, sr=None, duration=AUDIO_SECONDS)
+        clean_audio = librosa.resample(clean_audio, orig_sr=original_sr, target_sr=SAMPLE_RATE)
 
         required_length = AUDIO_SECONDS * SAMPLE_RATE
         if len(clean_audio) < required_length:
-            print(f"    -> Skipping {os.path.basename(clean_file_path)}: Audio is shorter than {required_length} samples.")
-            return None, None
+            # Pad with silence if it's slightly too short
+            clean_audio = librosa.util.fix_length(clean_audio, size=required_length)
 
         if noise_type == "white":
             noisy_audio = add_noise(clean_audio, np.random.randn(len(clean_audio)), SNR_DB)
@@ -84,31 +86,34 @@ def process_test_audio(clean_file_path, noise_type, noise_samples):
         elif noise_type == "reverb":
             noisy_audio = pedalboard_reverb(clean_audio, SAMPLE_RATE)
         elif noise_type == "noise_cancellation":
-            noisy_audio = noise_cancellation_effect(clean_audio)
+            noisy_audio = noise_cancellation_effect(clean_audio, SAMPLE_RATE)
         else:
             return None, None
 
-        clean_spectrogram = audio_to_spectrogram(clean_audio, N_FFT, HOP_LENGTH_FFT)
-        noisy_spectrogram = audio_to_spectrogram(noisy_audio, N_FFT, HOP_LENGTH_FFT)
+        clean_spectrogram = audio_to_spectrogram(clean_audio, N_FFT, HOP_LENGTH)
+        noisy_spectrogram = audio_to_spectrogram(noisy_audio, N_FFT, HOP_LENGTH)
         
         return (clean_audio, noisy_audio), (clean_spectrogram, noisy_spectrogram)
     
     except Exception as e:
-        print(f"    -> Error processing {clean_file_path}: {e}")
+        print(f"      -> Error processing {clean_file_path}: {e}")
         return None, None
 
 def main():
-    print("Starting test dataset creation...")
+    print("Starting test dataset creation at 44.1kHz...")
     clean_files = glob.glob(os.path.join(TEST_DATA_DIR_RAW, "*.wav"))
-    print(f"Found {len(clean_files)} clean audio files in '{TEST_DATA_DIR_RAW}'.")
-    if not clean_files:
-        print("Error: No .wav files found.")
-        return
-
-    urban_files = glob.glob(os.path.join(URBAN_SOUND_DIR, "*.wav"))
-    print(f"Found {len(urban_files)} noise audio files in '{URBAN_SOUND_DIR}'.")
+    print(f"Found {len(clean_files)} clean audio files.")
     
-    urban_samples = [librosa.load(f, sr=SAMPLE_RATE, duration=AUDIO_SECONDS)[0] for f in urban_files]
+    urban_files = glob.glob(os.path.join(URBAN_SOUND_DIR, "*.wav"))
+    print(f"Found {len(urban_files)} noise audio files.")
+    
+    # Load and resample urban noise files
+    urban_samples = []
+    for f in urban_files:
+        audio, sr = librosa.load(f, sr=None)
+        resampled_audio = librosa.resample(audio, orig_sr=sr, target_sr=SAMPLE_RATE)
+        urban_samples.append(resampled_audio)
+    
     if not urban_samples:
         print("Warning: No urban noise samples were loaded.")
 
@@ -138,7 +143,7 @@ def main():
         if all_clean_specs:
             np.save(os.path.join(TEST_DATA_DIR_PROCESSED, f"clean_{noise}.npy"), np.array(all_clean_specs))
             np.save(os.path.join(TEST_DATA_DIR_PROCESSED, f"noisy_{noise}.npy"), np.array(all_noisy_specs))
-            print(f"----> Successfully saved {len(all_clean_specs)} samples for '{noise}' noise.")
+            print(f"----> Successfully saved {len(all_clean_specs)} samples for '{noise}'.")
 
     print("\nTest dataset creation complete.")
 

@@ -14,7 +14,7 @@ from model import UNet
 MODEL_SAVE_DIR = "./saved_models"
 TEST_DATA_DIR = "./data/test_processed"
 OUTPUT_DIR = "./data/test_output_ensemble"
-SAMPLE_RATE = 8000
+SAMPLE_RATE = 44100
 N_FFT = 254
 HOP_LENGTH_FFT = 63
 

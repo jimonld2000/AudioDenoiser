@@ -45,3 +45,4 @@ torchaudio
 pedalboard
 torchsummary
 --extra-index-url https://github.com/vBaiCai/python-pesq/archive/master.zip
+pystoi

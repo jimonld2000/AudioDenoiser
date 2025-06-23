@@ -12,8 +12,8 @@ from pydub import AudioSegment
 TEST_DATA_DIR_RAW = "./data/test/clean"
 TEST_DATA_DIR_PROCESSED = "./data/test_processed"
 URBAN_SOUND_DIR = "./data/test/noise"
-SAMPLE_RATE = 8000
-AUDIO_SECONDS = 4
+SAMPLE_RATE = 44100
+AUDIO_SECONDS = 2
 N_FFT = 255
 HOP_LENGTH_FFT = 63
 SNR_DB = 8.0  # Target SNR in dB for noisy samples

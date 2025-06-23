@@ -1,0 +1,4 @@
+Objective metrics for noise type 'white':
+Average Input SNR: -3.38 dB
+Average Output SNR: -2.50 dB
+Average PESQ: N/A

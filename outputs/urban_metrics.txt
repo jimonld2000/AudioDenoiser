@@ -1,0 +1,4 @@
+Objective metrics for noise type 'urban':
+Average Input SNR: -3.28 dB
+Average Output SNR: -3.04 dB
+Average PESQ: N/A

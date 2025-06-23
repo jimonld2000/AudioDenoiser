@@ -1,0 +1,4 @@
+Objective metrics for noise type 'noise_cancellation':
+Average Input SNR: -1.27 dB
+Average Output SNR: -1.23 dB
+Average PESQ: N/A

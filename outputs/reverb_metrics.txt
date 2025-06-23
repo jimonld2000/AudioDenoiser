@@ -1,0 +1,4 @@
+Objective metrics for noise type 'reverb':
+Average Input SNR: -2.64 dB
+Average Output SNR: -2.95 dB
+Average PESQ: N/A

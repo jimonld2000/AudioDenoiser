@@ -1,188 +1,135 @@
+# code/create_test_dataset.py
+
 import os
+import glob
 import librosa
 import numpy as np
-import random
-# Pedalboard imports for Reverb
+import soundfile as sf
 from pedalboard import Pedalboard, Reverb
+from pydub import AudioSegment
 
-# ------------------------
-# Paths
-# ------------------------
-CLEAN_AUDIO_DIR = "./data/test/clean"
-NOISE_DIR = "./data/test/noise"
-# IMPULSE_RESPONSE_PATH = "./data/reverb/example_reverb.wav"
-OUTPUT_DIR = "./data/test_processed"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-# ------------------------
-# Parameters
-# ------------------------
+# --- Configuration ---
+TEST_DATA_DIR_RAW = "./data/test_raw"
+TEST_DATA_DIR_PROCESSED = "./data/test_processed"
+URBAN_SOUND_DIR = "./data/UrbanSound8K/audio"
 SAMPLE_RATE = 8000
-N_FFT = 512
-HOP_LENGTH_FFT = 128
+AUDIO_SECONDS = 4
+N_FFT = 255
+HOP_LENGTH_FFT = 63
+SNR_DB = 8.0  # Target SNR in dB for noisy samples
 
-# Example of noise types your code might handle:
-NOISE_TYPES = ["white", "urban", "reverb", "noise_cancellation"]
+# Ensure processed directory exists
+os.makedirs(TEST_DATA_DIR_PROCESSED, exist_ok=True)
 
-# Desired SNR in dB for “white” and “urban”
-SNR_DB = 8.0
+# --- Utility Functions ---
 
-# -------------------------------------------------
-# Utility Functions
-# -------------------------------------------------
+def audio_to_spectrogram(audio, n_fft, hop_length):
+    spectrogram = librosa.stft(audio, n_fft=n_fft, hop_length=hop_length)
+    return np.abs(spectrogram)
 
+def add_noise(clean_audio, noise, snr_db):
+    if len(noise) < len(clean_audio):
+        ratio = int(np.ceil(len(clean_audio) / len(noise)))
+        noise = np.tile(noise, ratio)
+    noise = noise[:len(clean_audio)]
+    
+    clean_rms = np.sqrt(np.mean(clean_audio**2))
+    noise_rms = np.sqrt(np.mean(noise**2))
+    if noise_rms == 0:
+        return clean_audio
+    
+    snr = 10**(snr_db / 20)
+    scale = clean_rms / (noise_rms * snr)
+    noisy_audio = clean_audio + noise * scale
+    return noisy_audio
 
-def audio_to_spectrogram(audio):
+def pedalboard_reverb(audio, sample_rate):
+    board = Pedalboard([Reverb(room_size=0.9, damping=0.9, wet_level=0.33)])
+    return board(audio, sample_rate)
+
+def noise_cancellation_effect(audio):
+    segment = AudioSegment(
+        audio.tobytes(), frame_rate=SAMPLE_RATE,
+        sample_width=audio.dtype.itemsize, channels=1
+    )
+    low_passed = segment.low_pass_filter(2000)
+    return np.array(low_passed.get_array_of_samples())
+
+def process_test_audio(clean_file_path, noise_type, noise_samples):
     """
-    Convert 1D audio array -> linear magnitude STFT spectrogram.
+    Processes a single clean audio file, adds a specified noise,
+    and saves both the spectrograms and the raw audio waveforms.
     """
-    stft_out = librosa.stft(audio, n_fft=N_FFT, hop_length=HOP_LENGTH_FFT)
-    magnitude, _ = librosa.magphase(stft_out)
-    return magnitude  # shape: (freq_bins, time_frames)
+    try:
+        clean_audio, _ = librosa.load(clean_file_path, sr=SAMPLE_RATE, duration=AUDIO_SECONDS)
+        
+        if len(clean_audio) < AUDIO_SECONDS * SAMPLE_RATE:
+            return None, None # Skip short files
 
-def match_audio_length(noise, target_len):
-    """
-    Return a noise array of exactly `target_len` samples by either
-    tiling or taking a random snippet.
-    """
-    if len(noise) == target_len:
-        return noise.copy()
-    elif len(noise) < target_len:
-        # tile
-        repeat_factor = int(np.ceil(target_len / len(noise)))
-        big = np.tile(noise, repeat_factor)
-        return big[:target_len]
-    else:
-        # noise is longer, pick random snippet
-        start = np.random.randint(0, len(noise) - target_len)
-        snippet = noise[start:start + target_len]
-        return snippet
-
-def pedalboard_reverb(clean_audio):
-    """
-    Apply Pedalboard Reverb to a mono audio numpy array.
-    Modify room_size/damping/wet_level as you like.
-    """
-    # Create a pedalboard with a single Reverb effect
-    board = Pedalboard([
-        Reverb(room_size=0.9, damping=0.9, wet_level=0.35)
-    ])
-
-    # Pedalboard expects shape (channels, samples). We'll assume mono audio => shape (1, num_samples)
-    mono_chunk = np.expand_dims(clean_audio, axis=0)
-    # Apply the board
-    effected = board(mono_chunk, SAMPLE_RATE)
-    # Shape is still (1, num_samples). Squeeze back to (num_samples,)
-    return np.squeeze(effected, axis=0)
-
-
-def add_noise(clean_audio, noise_audio, noise_type, snr_db=SNR_DB):
-    """
-    Add the specified noise_type to clean_audio:
-      - "white": random white noise at SNR = snr_db
-      - "urban": random snippet/tile of loaded noise at SNR = snr_db
-      - "reverb": use pedalboard reverb
-      - "noise_cancellation": partial cancellation segments
-    Returns the resulting noisy audio in [-1,1].
-    """
-    clean_len = len(clean_audio)
-
-    # -- Reverb using Pedalboard
-    if noise_type == "reverb":
-        # Apply Pedalboard reverb
-        out = pedalboard_reverb(clean_audio)
-        # Clip to [-1,1] in case the effect has boosted levels
-        noisy = np.clip(out, -1.0, 1.0)
-
-    # -- Noise cancellation
-    elif noise_type == "noise_cancellation":
-        noise = np.zeros_like(clean_audio)
-        i = 0
-        while i < clean_len:
-            end = min(i + 16000, clean_len)  # process in 2s blocks
-            if random.random() < 0.8:  # increased probability
-                half_end = i + 8000  # half the block
-                half_end = min(half_end, end)
-                noise[i:half_end] = -0.8 * clean_audio[i:half_end]  # stronger factor
-            i += 16000
-        noisy = clean_audio + noise
-        noisy = np.clip(noisy, -1.0, 1.0)
-
-    # -- White or Urban
-    else:
         if noise_type == "white":
-            noise_audio = np.random.randn(clean_len)
-        else:  # "urban"
-            if noise_audio is None or len(noise_audio) == 0:
-                noise_audio = np.zeros(clean_len, dtype=np.float32)
-            else:
-                noise_audio = match_audio_length(noise_audio, clean_len)
-
-        # SNR scaling
-        clean_rms = np.sqrt(np.mean(clean_audio ** 2) + 1e-12)
-        noise_rms = np.sqrt(np.mean(noise_audio ** 2) + 1e-12)
-        snr_linear = 10.0 ** (snr_db / 20.0)  # e.g., SNR=5dB => ~1.78
-        desired_noise_rms = clean_rms / snr_linear
-        if noise_rms > 1e-9:
-            noise_audio *= (desired_noise_rms / noise_rms)
+            noise = np.random.randn(len(clean_audio))
+            noisy_audio = add_noise(clean_audio, noise, SNR_DB)
+        elif noise_type == "urban":
+            noise_sample = noise_samples[np.random.randint(len(noise_samples))]
+            noisy_audio = add_noise(clean_audio, noise_sample, SNR_DB)
+        elif noise_type == "reverb":
+            noisy_audio = pedalboard_reverb(clean_audio, SAMPLE_RATE)
+        elif noise_type == "noise_cancellation":
+            noisy_audio = noise_cancellation_effect(clean_audio)
         else:
-            noise_audio = np.zeros_like(clean_audio)
-        out = clean_audio + noise_audio
-        noisy = np.clip(out, -1.0, 1.0)
+            return None, None
 
-    return noisy
+        clean_spectrogram = audio_to_spectrogram(clean_audio, N_FFT, HOP_LENGTH_FFT)
+        noisy_spectrogram = audio_to_spectrogram(noisy_audio, N_FFT, HOP_LENGTH_FFT)
+        
+        return (clean_audio, noisy_audio), (clean_spectrogram, noisy_spectrogram)
+    
+    except Exception as e:
+        print(f"Error processing {clean_file_path}: {e}")
+        return None, None
 
-def process_test_audio(clean_files, noise_files, noise_type):
-    clean_spects, noisy_spects = [], []
+def main():
+    print("Starting test dataset creation...")
+    clean_files = glob.glob(os.path.join(TEST_DATA_DIR_RAW, "*.wav"))
+    if not clean_files:
+        print(f"Error: No .wav files found in {TEST_DATA_DIR_RAW}")
+        return
 
-    for clean_file in clean_files:
-        y_clean, _ = librosa.load(clean_file, sr=SAMPLE_RATE)
+    # Load UrbanSound samples once
+    urban_files = glob.glob(os.path.join(URBAN_SOUND_DIR, "fold*/*.wav"))
+    urban_samples = [librosa.load(f, sr=SAMPLE_RATE, duration=AUDIO_SECONDS)[0] for f in urban_files[:10]]
+    
+    noise_types = ["white", "urban", "reverb", "noise_cancellation"]
+    
+    for noise in noise_types:
+        print(f"--- Processing noise type: {noise} ---")
+        all_clean_specs, all_noisy_specs = [], []
+        
+        # Directory for saving original wav files for testing
+        wav_output_dir = os.path.join(TEST_DATA_DIR_PROCESSED, noise)
+        os.makedirs(wav_output_dir, exist_ok=True)
+        
+        sample_count = 0
+        for i, file_path in enumerate(clean_files):
+            audio_data, spec_data = process_test_audio(file_path, noise, urban_samples)
+            if audio_data and spec_data:
+                clean_audio, noisy_audio = audio_data
+                clean_spec, noisy_spec = spec_data
+                
+                # Save original audio for accurate evaluation
+                sf.write(os.path.join(wav_output_dir, f"clean_{sample_count}.wav"), clean_audio, SAMPLE_RATE)
+                sf.write(os.path.join(wav_output_dir, f"noisy_{sample_count}.wav"), noisy_audio, SAMPLE_RATE)
 
-        # y_clean is the entire 2-second audio
-        noise_file = np.random.choice(
-            noise_files) if noise_type == "urban" else None
-        noise, _ = librosa.load(
-            noise_file, sr=SAMPLE_RATE) if noise_file else (None, None)
-        noisy = add_noise(y_clean, noise, noise_type,
-                          SNR_DB)  # must be the entire 2s
+                all_clean_specs.append(clean_spec)
+                all_noisy_specs.append(noisy_spec)
+                sample_count += 1
 
-        # convert each to spectrogram
-        clean_spects.append(audio_to_spectrogram(y_clean))
-        noisy_spects.append(audio_to_spectrogram(noisy))
+        if all_clean_specs:
+            np.save(os.path.join(TEST_DATA_DIR_PROCESSED, f"clean_{noise}.npy"), np.array(all_clean_specs))
+            np.save(os.path.join(TEST_DATA_DIR_PROCESSED, f"noisy_{noise}.npy"), np.array(all_noisy_specs))
+            print(f"Saved {len(all_clean_specs)} samples for {noise} noise.")
 
-    # shape: (N, freq_bins, time_frames)
-    return np.array(clean_spects), np.array(noisy_spects)
+    print("\nTest dataset creation complete.")
 
-
-# ------------------------
-# Main Script
-# ------------------------
-if __name__ == "__main__":
-
-    # Gather all clean files
-    clean_files = [
-        os.path.join(CLEAN_AUDIO_DIR, f)
-        for f in os.listdir(CLEAN_AUDIO_DIR)
-        if f.endswith(".wav")
-    ]
-    # Gather all noise files
-    noise_files = [
-        os.path.join(NOISE_DIR, f)
-        for f in os.listdir(NOISE_DIR)
-        if f.endswith(".wav")
-    ]
-
-    # Process each noise type
-    for noise_type in NOISE_TYPES:
-        print(f"Processing noise type: {noise_type}")
-        clean_batches, noisy_batches = process_test_audio(
-            clean_files, noise_files, noise_type
-        )
-
-        # e.g. Save to .npy
-        np.save(os.path.join(
-            OUTPUT_DIR, f"clean_{noise_type}.npy"), clean_batches)
-        np.save(os.path.join(
-            OUTPUT_DIR, f"noisy_{noise_type}.npy"), noisy_batches)
-
-    print("Test dataset creation is complete!")
+if __name__ == '__main__':
+    main()

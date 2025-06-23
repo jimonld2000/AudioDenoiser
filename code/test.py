@@ -1,46 +1,41 @@
+# code/test.py
+
 import os
 import torch
 import librosa
 import numpy as np
 import soundfile as sf
 import matplotlib.pyplot as plt
-import pesq
+import pypesq  # Corrected import
 
 from model import UNet
-from loss import CombinedPerceptualLoss
 
-# --------------------------------------------------
-# Paths & Parameters
-# --------------------------------------------------
-TEST_DATA_DIR = "./data/test_processed"     # Contains clean_{noise}.npy, noisy_{noise}.npy
-SAVED_MODELS_DIR = "./saved_models"           # Contains unet_denoiser_{noise}.pth
+# --- Configuration ---
+MODEL_SAVE_DIR = "./saved_models"
+TEST_DATA_DIR = "./data/test_processed"
 OUTPUT_DIR = "./data/test_output_ensemble"
+SAMPLE_RATE = 8000
+N_FFT = 255
+HOP_LENGTH_FFT = 63
+
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-SAMPLE_RATE = 8000
-N_FFT = 512
-HOP_LENGTH_FFT = 128
+# --- Utility Functions ---
 
-# Match the noise types for training
-NOISE_TYPES = ["white", "urban", "reverb", "noise_cancellation"]
+def griffin_lim_reconstruction(spectrogram, n_fft, hop_length, iterations=50):
+    """Reconstructs audio from a magnitude spectrogram using the Griffin-Lim algorithm."""
+    # Using librosa's implementation for convenience
+    return librosa.griffinlim(spectrogram, n_iter=iterations, hop_length=hop_length, win_length=n_fft)
 
-# --------------------------------------------------
-# Metric Calculation Functions                  
-# --------------------------------------------------
+# --- Metric Calculation Functions ---
+
 def calculate_snr(clean_signal, noisy_signal):
     """Calculates the Signal-to-Noise Ratio (SNR) in dB."""
-    # Ensure signals are numpy arrays
-    clean_signal = np.asarray(clean_signal)
-    noisy_signal = np.asarray(noisy_signal)
-    
-    # The noise is the difference between the noisy and clean signals
     noise = noisy_signal - clean_signal
     
-    # Calculate RMS of signal and noise
     rms_signal = np.sqrt(np.mean(clean_signal**2))
     rms_noise = np.sqrt(np.mean(noise**2))
     
-    # Avoid division by zero
     if rms_noise == 0:
         return float('inf')
         
@@ -52,103 +47,60 @@ def calculate_pesq(clean_signal, denoised_signal, sample_rate=8000):
     if sample_rate not in [8000, 16000]:
         raise ValueError("PESQ is only supported for 8kHz or 16kHz sample rates.")
     try:
-        return pesq(sample_rate, clean_signal, denoised_signal, 'nb') # 'nb' for narrowband
+        # Corrected PESQ call
+        return pypesq.pesq(sample_rate, clean_signal, denoised_signal, 'nb')
     except Exception as e:
         print(f"Could not calculate PESQ: {e}")
         return None
 
+# --- Main Testing Logic ---
 
-# --------------------------------------------------
-# Griffin-Lim Reconstruction 
-# --------------------------------------------------
-def griffin_lim_reconstruction(magnitude_spectrogram, n_fft, hop_length, iterations=50):
-    """
-    Reconstruct audio from linear magnitude spectrogram using Griffin-Lim.
-    magnitude_spectrogram: shape (freq_bins, time_frames).
-    Returns 1D audio array.
-    """
-    # Start with random phase
-    angles = np.exp(2j * np.pi * np.random.rand(*magnitude_spectrogram.shape))
-    complex_spec = magnitude_spectrogram * angles
-
-    for _ in range(iterations):
-        audio = librosa.istft(complex_spec, hop_length=hop_length) # Inverse STFT
-        new_complex_spec = librosa.stft( # STFT
-            audio, n_fft=n_fft, hop_length=hop_length
-        )
-        magnitude = np.abs(new_complex_spec)
-        phase = np.angle(new_complex_spec)
-        complex_spec = magnitude * np.exp(1j * phase) # Estimated complex spectrogram
-
-    return librosa.istft(complex_spec, hop_length=hop_length)
-
-
-# --------------------------------------------------
-# Utility: Load Model
-# --------------------------------------------------
-def load_model_for_noise(noise_type):
-    """
-    Loads the specialized UNet for the given noise_type,
-    e.g. unet_denoiser_white.pth, etc.
-    """
-    model_path = os.path.join(SAVED_MODELS_DIR, f"unet_denoiser_{noise_type}.pth")
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Model file not found: {model_path}")
-
-    model = UNet(in_channels=1, num_classes=1)
-    # Weights only is recommended for loading on CPU
-    model.load_state_dict(torch.load(model_path, map_location='cpu', weights_only=True))
-    model.eval()
-    print(f"Loaded model for noise type '{noise_type}' from: {model_path}")
-    return model
-
-
-# --------------------------------------------------
-# Testing Function
-# --------------------------------------------------
-
-def test_single_noise_type(model, noise_type, test_data_dir, output_dir):
+def test_single_noise_type(model, noise_type):
     """
     Tests a single noise-type model, calculates objective metrics (SNR, PESQ),
     and saves all relevant outputs.
     """
     print(f"\n=== Testing model on noise type: {noise_type} ===")
-
-    clean_path = os.path.join(test_data_dir, f"clean_{noise_type}.npy")
-    noisy_path = os.path.join(test_data_dir, f"noisy_{noise_type}.npy")
-
-    if not (os.path.exists(clean_path) and os.path.exists(noisy_path)):
-        print(f"Skipping {noise_type}, missing data files.")
+    
+    # Path to spectrograms for model input
+    noisy_spectrogram_path = os.path.join(TEST_DATA_DIR, f"noisy_{noise_type}.npy")
+    if not os.path.exists(noisy_spectrogram_path):
+        print(f"Skipping {noise_type}, missing data file: {noisy_spectrogram_path}")
         return
 
-    clean_spectrograms = np.load(clean_path)
-    noisy_spectrograms = np.load(noisy_path)
+    noisy_spectrograms = np.load(noisy_spectrogram_path)
     num_samples = len(noisy_spectrograms)
     print(f"Found {num_samples} test samples for '{noise_type}'")
+
+    # Path to original audio files for accurate evaluation
+    original_audio_dir = os.path.join(TEST_DATA_DIR, noise_type)
 
     # --- Run model to get denoised spectrograms ---
     noisy_torch = torch.tensor(noisy_spectrograms, dtype=torch.float32).unsqueeze(1)
     with torch.no_grad():
         denoised_torch = model(noisy_torch)
-        denoised_spectrograms = denoised_torch.squeeze(1).cpu().numpy()
+    denoised_spectrograms = denoised_torch.squeeze(1).cpu().numpy()
 
     # --- Initialize lists to store metrics ---
     input_snr_list, output_snr_list, pesq_list = [], [], []
 
     # --- Process each sample to get audio and calculate metrics ---
     for i in range(num_samples):
-        # Reconstruct audio from spectrograms using Griffin-Lim
-        clean_audio = griffin_lim_reconstruction(clean_spectrograms[i], N_FFT, HOP_LENGTH_FFT)
-        noisy_audio = griffin_lim_reconstruction(noisy_spectrograms[i], N_FFT, HOP_LENGTH_FFT)
+        # Load the ORIGINAL clean and noisy audio for ground truth
+        try:
+            clean_audio, _ = librosa.load(os.path.join(original_audio_dir, f"clean_{i}.wav"), sr=SAMPLE_RATE)
+            noisy_audio, _ = librosa.load(os.path.join(original_audio_dir, f"noisy_{i}.wav"), sr=SAMPLE_RATE)
+        except Exception as e:
+            print(f"Warning: Could not load original audio for sample {i}. Skipping. Error: {e}")
+            continue
+
+        # Reconstruct only the DENOISED audio from the model's output spectrogram
         denoised_audio = griffin_lim_reconstruction(denoised_spectrograms[i], N_FFT, HOP_LENGTH_FFT)
 
-        # Save some example audio files
-        if i < 5:
-            sf.write(os.path.join(output_dir, f"{noise_type}_clean_sample_{i}.wav"), clean_audio, SAMPLE_RATE)
-            sf.write(os.path.join(output_dir, f"{noise_type}_noisy_sample_{i}.wav"), noisy_audio, SAMPLE_RATE)
-            sf.write(os.path.join(output_dir, f"{noise_type}_denoised_sample_{i}.wav"), denoised_audio, SAMPLE_RATE)
+        # Save example denoised audio files
+        sf.write(os.path.join(OUTPUT_DIR, f"{noise_type}_denoised_sample_{i}.wav"), denoised_audio, SAMPLE_RATE)
 
-        # --- Calculate metrics ---
+        # --- Calculate metrics using original audio as ground truth ---
         input_snr = calculate_snr(clean_audio, noisy_audio)
         output_snr = calculate_snr(clean_audio, denoised_audio)
         pesq_score = calculate_pesq(clean_audio, denoised_audio, SAMPLE_RATE)
@@ -159,57 +111,31 @@ def test_single_noise_type(model, noise_type, test_data_dir, output_dir):
             pesq_list.append(pesq_score)
 
     # --- Calculate and print average metrics ---
-    avg_input_snr = np.mean(input_snr_list)
-    avg_output_snr = np.mean(output_snr_list)
+    avg_input_snr = np.mean(input_snr_list) if input_snr_list else "N/A"
+    avg_output_snr = np.mean(output_snr_list) if output_snr_list else "N/A"
     avg_pesq = np.mean(pesq_list) if pesq_list else "N/A"
 
     print(f"\nAverage Metrics for noise type '{noise_type}':")
-    print(f"  - Average Input SNR: {avg_input_snr:.2f} dB")
-    print(f"  - Average Output SNR: {avg_output_snr:.2f} dB")
+    print(f"  - Average Input SNR: {avg_input_snr if isinstance(avg_input_snr, str) else f'{avg_input_snr:.2f} dB'}")
+    print(f"  - Average Output SNR: {avg_output_snr if isinstance(avg_output_snr, str) else f'{avg_output_snr:.2f} dB'}")
     print(f"  - Average PESQ: {avg_pesq if isinstance(avg_pesq, str) else f'{avg_pesq:.2f}'}")
 
-    # --- Save metrics to a text file ---
-    metrics_file_path = os.path.join(output_dir, f"{noise_type}_metrics.txt")
-    with open(metrics_file_path, "w") as f:
-        f.write(f"Objective metrics for noise type '{noise_type}':\n")
-        f.write(f"Average Input SNR: {avg_input_snr:.2f} dB\n")
-        f.write(f"Average Output SNR: {avg_output_snr:.2f} dB\n")
-        f.write(f"Average PESQ: {avg_pesq if isinstance(avg_pesq, str) else f'{avg_pesq:.2f}'}\n")
-
-    # --- Plot spectrogram comparisons (no changes needed here) ---
-    for i in range(min(5, num_samples)):
-        plt.figure(figsize=(12, 6))
-        def plot_spectrogram(spec, title, pos):
-            plt.subplot(1, 3, pos)
-            plt.title(title)
-            plt.imshow(spec, aspect='auto', origin='lower', cmap='magma')
-            plt.colorbar(format='%+2.0f dB')
-        
-        plot_spectrogram(noisy_spectrograms[i], "Noisy Spectrogram", 1)
-        plot_spectrogram(denoised_spectrograms[i], "Denoised Spectrogram", 2)
-        plot_spectrogram(clean_spectrograms[i], "Clean Spectrogram", 3)
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, f"{noise_type}_spectrogram_{i}.png"))
-        plt.close()
-# --------------------------------------------------
-# Main
-# --------------------------------------------------
-if __name__ == "__main__":
+def main():
     print("Starting specialized test for each noise type...")
-
-    for noise_type in NOISE_TYPES:
-        # 1) Load the specialized model (if available)
-        try:
-            model = load_model_for_noise(noise_type)
-        except FileNotFoundError:
-            print(f"Model for noise type '{noise_type}' not found. Skipping.")
-            print(f"Model for noise type '{noise_type}' not found. Skipping.")
+    noise_types = ["white", "urban", "reverb", "noise_cancellation"]
+    
+    for noise_type in noise_types:
+        model_path = os.path.join(MODEL_SAVE_DIR, f"unet_denoiser_{noise_type}.pth")
+        if not os.path.exists(model_path):
+            print(f"Model for noise type '{noise_type}' not found at: {model_path}")
             continue
 
-        # 2) Test on corresponding test data
-        test_single_noise_type(
-            model=model,
-            noise_type=noise_type,
-            test_data_dir=TEST_DATA_DIR,
-            output_dir=OUTPUT_DIR
-        )
+        print(f"Loaded model for noise type '{noise_type}' from: {model_path}")
+        model = UNet(in_channels=1)
+        model.load_state_dict(torch.load(model_path))
+        model.eval()
+        
+        test_single_noise_type(model, noise_type)
+
+if __name__ == '__main__':
+    main()

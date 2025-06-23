@@ -23,41 +23,41 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # --- Utility Functions ---
 
 def griffin_lim_reconstruction(spectrogram, n_fft, hop_length, iterations=50, length=None):
-    """
-    Reconstructs audio from a magnitude spectrogram using the Griffin-Lim algorithm.
-    An explicit length is passed to ensure the output matches the original audio.
-    """
     return librosa.griffinlim(spectrogram, n_iter=iterations, hop_length=hop_length, win_length=n_fft, length=length)
 
 # --- Metric Calculation Functions ---
 
 def calculate_snr(clean_signal, noisy_signal):
-    """Calculates the Signal-to-Noise Ratio (SNR) in dB."""
-    # Ensure both signals have the same length
     min_len = min(len(clean_signal), len(noisy_signal))
     clean_signal = clean_signal[:min_len]
     noisy_signal = noisy_signal[:min_len]
-    
     noise = noisy_signal - clean_signal
-    
     rms_signal = np.sqrt(np.mean(clean_signal**2))
     rms_noise = np.sqrt(np.mean(noise**2))
-    
-    if rms_noise == 0:
-        return float('inf')
-        
+    if rms_noise == 0: return float('inf')
     snr = 20 * np.log10(rms_signal / rms_noise)
     return snr
 
 def calculate_pesq(clean_signal, denoised_signal, sample_rate=8000):
-    """Calculates the Perceptual Evaluation of Speech Quality (PESQ)."""
     if sample_rate not in [8000, 16000]:
         print(f"Warning: PESQ is only supported for 8kHz or 16kHz. Skipping for SR={sample_rate}.")
         return None
+    
+    # --- FIX --- Convert float audio to int16, which pypesq expects.
     try:
-        # Ensure signals have the same length for PESQ
         min_len = min(len(clean_signal), len(denoised_signal))
-        return pypesq.pesq(sample_rate, clean_signal[:min_len], denoised_signal[:min_len], 'nb')
+        clean_s = clean_signal[:min_len]
+        denoised_s = denoised_signal[:min_len]
+
+        # Check for silent signals which cause errors
+        if np.sum(np.abs(clean_s)) == 0 or np.sum(np.abs(denoised_s)) == 0:
+            print("Could not calculate PESQ: A signal is silent.")
+            return None
+
+        clean_int16 = (clean_s * 32767).astype(np.int16)
+        denoised_int16 = (denoised_s * 32767).astype(np.int16)
+        
+        return pypesq.pesq(sample_rate, clean_int16, denoised_int16, 'nb')
     except Exception as e:
         print(f"Could not calculate PESQ: {e}")
         return None
@@ -65,15 +65,11 @@ def calculate_pesq(clean_signal, denoised_signal, sample_rate=8000):
 # --- Main Testing Logic ---
 
 def test_single_noise_type(model, noise_type):
-    """
-    Tests a single noise-type model, calculates objective metrics (SNR, PESQ),
-    and saves all relevant outputs.
-    """
     print(f"\n=== Testing model on noise type: {noise_type} ===")
     
     noisy_spectrogram_path = os.path.join(TEST_DATA_DIR, f"noisy_{noise_type}.npy")
     if not os.path.exists(noisy_spectrogram_path):
-        print(f"Skipping {noise_type}, missing data file: {noisy_spectrogram_path}")
+        print(f"Skipping {noise_type}, missing data file.")
         return
 
     noisy_spectrograms = np.load(noisy_spectrogram_path)
@@ -94,23 +90,18 @@ def test_single_noise_type(model, noise_type):
             clean_audio, _ = librosa.load(os.path.join(original_audio_dir, f"clean_{i}.wav"), sr=SAMPLE_RATE)
             noisy_audio, _ = librosa.load(os.path.join(original_audio_dir, f"noisy_{i}.wav"), sr=SAMPLE_RATE)
         except Exception as e:
-            print(f"Warning: Could not load original audio for sample {i}. Skipping. Error: {e}")
+            print(f"Warning: Could not load audio for sample {i}. Skipping. Error: {e}")
             continue
 
-        # --- FIX --- Pass the length of the original audio to the reconstruction function
         target_length = len(clean_audio)
         denoised_audio = griffin_lim_reconstruction(denoised_spectrograms[i], N_FFT, HOP_LENGTH_FFT, length=target_length)
-
         sf.write(os.path.join(OUTPUT_DIR, f"{noise_type}_denoised_sample_{i}.wav"), denoised_audio, SAMPLE_RATE)
 
-        input_snr = calculate_snr(clean_audio, noisy_audio)
-        output_snr = calculate_snr(clean_audio, denoised_audio)
-        pesq_score = calculate_pesq(clean_audio, denoised_audio, SAMPLE_RATE)
+        input_snr_list.append(calculate_snr(clean_audio, noisy_audio))
+        output_snr_list.append(calculate_snr(clean_audio, denoised_audio))
         
-        input_snr_list.append(input_snr)
-        output_snr_list.append(output_snr)
-        if pesq_score is not None:
-            pesq_list.append(pesq_score)
+        pesq_score = calculate_pesq(clean_audio, denoised_audio, SAMPLE_RATE)
+        if pesq_score is not None: pesq_list.append(pesq_score)
 
     avg_input_snr = np.mean(input_snr_list) if input_snr_list else "N/A"
     avg_output_snr = np.mean(output_snr_list) if output_snr_list else "N/A"
@@ -128,7 +119,7 @@ def main():
     for noise_type in noise_types:
         model_path = os.path.join(MODEL_SAVE_DIR, f"unet_denoiser_{noise_type}.pth")
         if not os.path.exists(model_path):
-            print(f"Model for noise type '{noise_type}' not found at: {model_path}")
+            print(f"Model for '{noise_type}' not found.")
             continue
 
         print(f"Loaded model for noise type '{noise_type}' from: {model_path}")

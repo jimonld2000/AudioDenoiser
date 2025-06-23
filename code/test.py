@@ -1,4 +1,4 @@
-# code/test.py
+# code/test.py (Final Corrected Version)
 
 import os
 import torch
@@ -6,7 +6,7 @@ import librosa
 import numpy as np
 import soundfile as sf
 import matplotlib.pyplot as plt
-import pypesq  # Corrected import
+import pypesq
 
 from model import UNet
 
@@ -22,15 +22,22 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # --- Utility Functions ---
 
-def griffin_lim_reconstruction(spectrogram, n_fft, hop_length, iterations=50):
-    """Reconstructs audio from a magnitude spectrogram using the Griffin-Lim algorithm."""
-    # Using librosa's implementation for convenience
-    return librosa.griffinlim(spectrogram, n_iter=iterations, hop_length=hop_length, win_length=n_fft)
+def griffin_lim_reconstruction(spectrogram, n_fft, hop_length, iterations=50, length=None):
+    """
+    Reconstructs audio from a magnitude spectrogram using the Griffin-Lim algorithm.
+    An explicit length is passed to ensure the output matches the original audio.
+    """
+    return librosa.griffinlim(spectrogram, n_iter=iterations, hop_length=hop_length, win_length=n_fft, length=length)
 
 # --- Metric Calculation Functions ---
 
 def calculate_snr(clean_signal, noisy_signal):
     """Calculates the Signal-to-Noise Ratio (SNR) in dB."""
+    # Ensure both signals have the same length
+    min_len = min(len(clean_signal), len(noisy_signal))
+    clean_signal = clean_signal[:min_len]
+    noisy_signal = noisy_signal[:min_len]
+    
     noise = noisy_signal - clean_signal
     
     rms_signal = np.sqrt(np.mean(clean_signal**2))
@@ -45,10 +52,12 @@ def calculate_snr(clean_signal, noisy_signal):
 def calculate_pesq(clean_signal, denoised_signal, sample_rate=8000):
     """Calculates the Perceptual Evaluation of Speech Quality (PESQ)."""
     if sample_rate not in [8000, 16000]:
-        raise ValueError("PESQ is only supported for 8kHz or 16kHz sample rates.")
+        print(f"Warning: PESQ is only supported for 8kHz or 16kHz. Skipping for SR={sample_rate}.")
+        return None
     try:
-        # Corrected PESQ call
-        return pypesq.pesq(sample_rate, clean_signal, denoised_signal, 'nb')
+        # Ensure signals have the same length for PESQ
+        min_len = min(len(clean_signal), len(denoised_signal))
+        return pypesq.pesq(sample_rate, clean_signal[:min_len], denoised_signal[:min_len], 'nb')
     except Exception as e:
         print(f"Could not calculate PESQ: {e}")
         return None
@@ -62,7 +71,6 @@ def test_single_noise_type(model, noise_type):
     """
     print(f"\n=== Testing model on noise type: {noise_type} ===")
     
-    # Path to spectrograms for model input
     noisy_spectrogram_path = os.path.join(TEST_DATA_DIR, f"noisy_{noise_type}.npy")
     if not os.path.exists(noisy_spectrogram_path):
         print(f"Skipping {noise_type}, missing data file: {noisy_spectrogram_path}")
@@ -72,21 +80,16 @@ def test_single_noise_type(model, noise_type):
     num_samples = len(noisy_spectrograms)
     print(f"Found {num_samples} test samples for '{noise_type}'")
 
-    # Path to original audio files for accurate evaluation
     original_audio_dir = os.path.join(TEST_DATA_DIR, noise_type)
 
-    # --- Run model to get denoised spectrograms ---
     noisy_torch = torch.tensor(noisy_spectrograms, dtype=torch.float32).unsqueeze(1)
     with torch.no_grad():
         denoised_torch = model(noisy_torch)
     denoised_spectrograms = denoised_torch.squeeze(1).cpu().numpy()
 
-    # --- Initialize lists to store metrics ---
     input_snr_list, output_snr_list, pesq_list = [], [], []
 
-    # --- Process each sample to get audio and calculate metrics ---
     for i in range(num_samples):
-        # Load the ORIGINAL clean and noisy audio for ground truth
         try:
             clean_audio, _ = librosa.load(os.path.join(original_audio_dir, f"clean_{i}.wav"), sr=SAMPLE_RATE)
             noisy_audio, _ = librosa.load(os.path.join(original_audio_dir, f"noisy_{i}.wav"), sr=SAMPLE_RATE)
@@ -94,13 +97,12 @@ def test_single_noise_type(model, noise_type):
             print(f"Warning: Could not load original audio for sample {i}. Skipping. Error: {e}")
             continue
 
-        # Reconstruct only the DENOISED audio from the model's output spectrogram
-        denoised_audio = griffin_lim_reconstruction(denoised_spectrograms[i], N_FFT, HOP_LENGTH_FFT)
+        # --- FIX --- Pass the length of the original audio to the reconstruction function
+        target_length = len(clean_audio)
+        denoised_audio = griffin_lim_reconstruction(denoised_spectrograms[i], N_FFT, HOP_LENGTH_FFT, length=target_length)
 
-        # Save example denoised audio files
         sf.write(os.path.join(OUTPUT_DIR, f"{noise_type}_denoised_sample_{i}.wav"), denoised_audio, SAMPLE_RATE)
 
-        # --- Calculate metrics using original audio as ground truth ---
         input_snr = calculate_snr(clean_audio, noisy_audio)
         output_snr = calculate_snr(clean_audio, denoised_audio)
         pesq_score = calculate_pesq(clean_audio, denoised_audio, SAMPLE_RATE)
@@ -110,7 +112,6 @@ def test_single_noise_type(model, noise_type):
         if pesq_score is not None:
             pesq_list.append(pesq_score)
 
-    # --- Calculate and print average metrics ---
     avg_input_snr = np.mean(input_snr_list) if input_snr_list else "N/A"
     avg_output_snr = np.mean(output_snr_list) if output_snr_list else "N/A"
     avg_pesq = np.mean(pesq_list) if pesq_list else "N/A"

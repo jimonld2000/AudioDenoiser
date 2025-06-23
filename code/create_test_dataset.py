@@ -1,4 +1,4 @@
-# code/create_test_dataset.py (Debug Version)
+# code/create_test_dataset.py (Final Corrected Version)
 
 import os
 import glob
@@ -12,13 +12,12 @@ from pydub import AudioSegment
 TEST_DATA_DIR_RAW = "./data/test/clean"
 TEST_DATA_DIR_PROCESSED = "./data/test_processed"
 URBAN_SOUND_DIR = "./data/test/noise"
-SAMPLE_RATE = 44100
-AUDIO_SECONDS = 2
+SAMPLE_RATE = 8000
+AUDIO_SECONDS = 2 # Adjusted to match your files (16000 samples / 8000 Hz)
 N_FFT = 255
 HOP_LENGTH_FFT = 63
-SNR_DB = 8.0  # Target SNR in dB for noisy samples
+SNR_DB = 8.0
 
-# Ensure processed directory exists
 os.makedirs(TEST_DATA_DIR_PROCESSED, exist_ok=True)
 
 # --- Utility Functions ---
@@ -35,8 +34,7 @@ def add_noise(clean_audio, noise, snr_db):
     
     clean_rms = np.sqrt(np.mean(clean_audio**2))
     noise_rms = np.sqrt(np.mean(noise**2))
-    if noise_rms == 0:
-        return clean_audio
+    if noise_rms == 0: return clean_audio
     
     snr = 10**(snr_db / 20)
     scale = clean_rms / (noise_rms * snr)
@@ -48,37 +46,39 @@ def pedalboard_reverb(audio, sample_rate):
     return board(audio, sample_rate)
 
 def noise_cancellation_effect(audio):
+    """
+    Applies a low-pass filter and ensures the output is float32.
+    """
+    # pydub works with integers, so we need to convert from float
+    # Assuming input 'audio' is float32 in [-1.0, 1.0]
+    int_audio = (audio * 32767).astype(np.int16)
+
     segment = AudioSegment(
-        audio.tobytes(), frame_rate=SAMPLE_RATE,
-        sample_width=audio.dtype.itemsize, channels=1
+        int_audio.tobytes(), frame_rate=SAMPLE_RATE,
+        sample_width=int_audio.dtype.itemsize, channels=1
     )
     low_passed = segment.low_pass_filter(2000)
-    return np.array(low_passed.get_array_of_samples())
+    
+    # --- FIX ---
+    # Convert back to a numpy array of integers
+    processed_int_array = np.array(low_passed.get_array_of_samples())
+    # Convert back to float32 and normalize to [-1.0, 1.0]
+    processed_float_array = processed_int_array.astype(np.float32) / 32768.0
+    return processed_float_array
 
 def process_test_audio(clean_file_path, noise_type, noise_samples):
-    """
-    Processes a single clean audio file, adds a specified noise,
-    and saves both the spectrograms and the raw audio waveforms.
-    """
     try:
-        clean_audio, _ = librosa.load(clean_file_path, sr=SAMPLE_RATE, duration=AUDIO_SECONDS)
-        
-        # --- DIAGNOSTIC PRINT ---
-        print(f"  - Processing {os.path.basename(clean_file_path)}: length={len(clean_audio)} samples.")
-        
+        clean_audio, _ = librosa.load(clean_file_path, sr=SAMPLE_RATE, duration=AUDIO_SECONDS, res_type='kaiser_fast')
+
         required_length = AUDIO_SECONDS * SAMPLE_RATE
         if len(clean_audio) < required_length:
-            # --- DIAGNOSTIC PRINT ---
-            print(f"    -> Skipping: Audio is shorter than the required {required_length} samples.")
-            return None, None # Skip short files
+            print(f"    -> Skipping {os.path.basename(clean_file_path)}: Audio is shorter than {required_length} samples.")
+            return None, None
 
         if noise_type == "white":
-            noise = np.random.randn(len(clean_audio))
-            noisy_audio = add_noise(clean_audio, noise, SNR_DB)
+            noisy_audio = add_noise(clean_audio, np.random.randn(len(clean_audio)), SNR_DB)
         elif noise_type == "urban":
-            if not noise_samples:
-                 print("    -> Skipping 'urban' noise: No noise files were found.")
-                 return None, None
+            if not noise_samples: return None, None
             noise_sample = noise_samples[np.random.randint(len(noise_samples))]
             noisy_audio = add_noise(clean_audio, noise_sample, SNR_DB)
         elif noise_type == "reverb":
@@ -100,24 +100,17 @@ def process_test_audio(clean_file_path, noise_type, noise_samples):
 def main():
     print("Starting test dataset creation...")
     clean_files = glob.glob(os.path.join(TEST_DATA_DIR_RAW, "*.wav"))
-    
-    # --- DIAGNOSTIC PRINT ---
     print(f"Found {len(clean_files)} clean audio files in '{TEST_DATA_DIR_RAW}'.")
-
     if not clean_files:
-        print(f"Error: No .wav files found. Please check the path.")
+        print("Error: No .wav files found.")
         return
 
-    # --- FIX --- Changed glob to be less specific.
-    urban_files_glob = os.path.join(URBAN_SOUND_DIR, "*.wav")
-    urban_files = glob.glob(urban_files_glob)
-    
-    # --- DIAGNOSTIC PRINT ---
+    urban_files = glob.glob(os.path.join(URBAN_SOUND_DIR, "*.wav"))
     print(f"Found {len(urban_files)} noise audio files in '{URBAN_SOUND_DIR}'.")
     
     urban_samples = [librosa.load(f, sr=SAMPLE_RATE, duration=AUDIO_SECONDS)[0] for f in urban_files]
     if not urban_samples:
-        print("Warning: No urban noise samples were loaded. The 'urban' noise type will be skipped.")
+        print("Warning: No urban noise samples were loaded.")
 
     noise_types = ["white", "urban", "reverb", "noise_cancellation"]
     

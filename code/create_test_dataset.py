@@ -9,9 +9,9 @@ from pedalboard import Pedalboard, Reverb
 from pydub import AudioSegment
 
 # --- Configuration ---
-TEST_DATA_DIR_RAW = "./data/test_raw"
+TEST_DATA_DIR_RAW = "./data/test_clean"
 TEST_DATA_DIR_PROCESSED = "./data/test_processed"
-URBAN_SOUND_DIR = "./data/UrbanSound8K/audio"
+URBAN_SOUND_DIR = "./data/train/noise"
 SAMPLE_RATE = 8000
 AUDIO_SECONDS = 4
 N_FFT = 255

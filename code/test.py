@@ -4,7 +4,7 @@ import librosa
 import numpy as np
 import soundfile as sfa
 import matplotlib.pyplot as plt
-from pypesq import pesq
+import pesq
 
 from model import UNet
 from loss import CombinedPerceptualLoss

@@ -1,4 +1,4 @@
-# code/test.py (Final Corrected Version)
+# code/test.py (Final Version)
 
 import os
 import torch
@@ -6,7 +6,7 @@ import librosa
 import numpy as np
 import soundfile as sf
 import matplotlib.pyplot as plt
-import pypesq
+from pesq import pesq # Using the more robust 'pesq' library
 
 from model import UNet
 
@@ -23,41 +23,45 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # --- Utility Functions ---
 
 def griffin_lim_reconstruction(spectrogram, n_fft, hop_length, iterations=50, length=None):
+    """Reconstructs audio from a magnitude spectrogram using the Griffin-Lim algorithm."""
     return librosa.griffinlim(spectrogram, n_iter=iterations, hop_length=hop_length, win_length=n_fft, length=length)
 
 # --- Metric Calculation Functions ---
 
 def calculate_snr(clean_signal, noisy_signal):
+    """Calculates the Signal-to-Noise Ratio (SNR) in dB."""
     min_len = min(len(clean_signal), len(noisy_signal))
     clean_signal = clean_signal[:min_len]
     noisy_signal = noisy_signal[:min_len]
+    
     noise = noisy_signal - clean_signal
+    
     rms_signal = np.sqrt(np.mean(clean_signal**2))
     rms_noise = np.sqrt(np.mean(noise**2))
-    if rms_noise == 0: return float('inf')
+    
+    if rms_noise == 0:
+        return float('inf')
+        
     snr = 20 * np.log10(rms_signal / rms_noise)
     return snr
 
 def calculate_pesq(clean_signal, denoised_signal, sample_rate=8000):
+    """Calculates PESQ using the robust 'pesq' library."""
     if sample_rate not in [8000, 16000]:
         print(f"Warning: PESQ is only supported for 8kHz or 16kHz. Skipping for SR={sample_rate}.")
         return None
-    
-    # --- FIX --- Convert float audio to int16, which pypesq expects.
     try:
+        # The 'pesq' library works directly with float audio arrays.
         min_len = min(len(clean_signal), len(denoised_signal))
         clean_s = clean_signal[:min_len]
         denoised_s = denoised_signal[:min_len]
 
-        # Check for silent signals which cause errors
+        # Check for silent signals which can cause errors
         if np.sum(np.abs(clean_s)) == 0 or np.sum(np.abs(denoised_s)) == 0:
             print("Could not calculate PESQ: A signal is silent.")
             return None
-
-        clean_int16 = (clean_s * 32767).astype(np.int16)
-        denoised_int16 = (denoised_s * 32767).astype(np.int16)
-        
-        return pypesq.pesq(sample_rate, clean_int16, denoised_int16, 'nb')
+            
+        return pesq(sample_rate, clean_s, denoised_s, 'nb') # 'nb' for narrowband
     except Exception as e:
         print(f"Could not calculate PESQ: {e}")
         return None
@@ -65,6 +69,10 @@ def calculate_pesq(clean_signal, denoised_signal, sample_rate=8000):
 # --- Main Testing Logic ---
 
 def test_single_noise_type(model, noise_type):
+    """
+    Tests a single noise-type model, calculates objective metrics (SNR, PESQ),
+    and saves all relevant outputs.
+    """
     print(f"\n=== Testing model on noise type: {noise_type} ===")
     
     noisy_spectrogram_path = os.path.join(TEST_DATA_DIR, f"noisy_{noise_type}.npy")
@@ -90,7 +98,7 @@ def test_single_noise_type(model, noise_type):
             clean_audio, _ = librosa.load(os.path.join(original_audio_dir, f"clean_{i}.wav"), sr=SAMPLE_RATE)
             noisy_audio, _ = librosa.load(os.path.join(original_audio_dir, f"noisy_{i}.wav"), sr=SAMPLE_RATE)
         except Exception as e:
-            print(f"Warning: Could not load audio for sample {i}. Skipping. Error: {e}")
+            print(f"Warning: Could not load original audio for sample {i}. Skipping. Error: {e}")
             continue
 
         target_length = len(clean_audio)

@@ -2,7 +2,7 @@ import os
 import torch
 import librosa
 import numpy as np
-import soundfile as sfa
+import soundfile as sf
 import matplotlib.pyplot as plt
 import pesq
 

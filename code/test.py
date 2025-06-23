@@ -15,8 +15,8 @@ MODEL_SAVE_DIR = "./saved_models"
 TEST_DATA_DIR = "./data/test_processed"
 OUTPUT_DIR = "./data/test_output_ensemble"
 SAMPLE_RATE = 44100
-N_FFT = 254
-HOP_LENGTH_FFT = 63
+N_FFT = 510
+HOP_LENGTH_FFT = 1400
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -45,7 +45,7 @@ def calculate_snr(clean_signal, noisy_signal):
     snr = 20 * np.log10(rms_signal / rms_noise)
     return snr
 
-def calculate_pesq(clean_signal, denoised_signal, sample_rate=8000):
+def calculate_pesq(clean_signal, denoised_signal, sample_rate=16000):
     """Calculates PESQ using the robust 'pesq' library."""
     if sample_rate not in [8000, 16000]:
         print(f"Warning: PESQ is only supported for 8kHz or 16kHz. Skipping for SR={sample_rate}.")

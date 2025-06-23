@@ -6,7 +6,7 @@ import librosa
 import numpy as np
 import soundfile as sf
 from pesq import pesq
-from stoi import stoi
+from pystoi import stoi
 
 from model import UNet
 

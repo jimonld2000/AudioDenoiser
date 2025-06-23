@@ -1,4 +1,4 @@
-# code/create_test_dataset.py
+# code/create_test_dataset.py (Debug Version)
 
 import os
 import glob
@@ -63,13 +63,22 @@ def process_test_audio(clean_file_path, noise_type, noise_samples):
     try:
         clean_audio, _ = librosa.load(clean_file_path, sr=SAMPLE_RATE, duration=AUDIO_SECONDS)
         
-        if len(clean_audio) < AUDIO_SECONDS * SAMPLE_RATE:
+        # --- DIAGNOSTIC PRINT ---
+        print(f"  - Processing {os.path.basename(clean_file_path)}: length={len(clean_audio)} samples.")
+        
+        required_length = AUDIO_SECONDS * SAMPLE_RATE
+        if len(clean_audio) < required_length:
+            # --- DIAGNOSTIC PRINT ---
+            print(f"    -> Skipping: Audio is shorter than the required {required_length} samples.")
             return None, None # Skip short files
 
         if noise_type == "white":
             noise = np.random.randn(len(clean_audio))
             noisy_audio = add_noise(clean_audio, noise, SNR_DB)
         elif noise_type == "urban":
+            if not noise_samples:
+                 print("    -> Skipping 'urban' noise: No noise files were found.")
+                 return None, None
             noise_sample = noise_samples[np.random.randint(len(noise_samples))]
             noisy_audio = add_noise(clean_audio, noise_sample, SNR_DB)
         elif noise_type == "reverb":
@@ -85,27 +94,37 @@ def process_test_audio(clean_file_path, noise_type, noise_samples):
         return (clean_audio, noisy_audio), (clean_spectrogram, noisy_spectrogram)
     
     except Exception as e:
-        print(f"Error processing {clean_file_path}: {e}")
+        print(f"    -> Error processing {clean_file_path}: {e}")
         return None, None
 
 def main():
     print("Starting test dataset creation...")
     clean_files = glob.glob(os.path.join(TEST_DATA_DIR_RAW, "*.wav"))
+    
+    # --- DIAGNOSTIC PRINT ---
+    print(f"Found {len(clean_files)} clean audio files in '{TEST_DATA_DIR_RAW}'.")
+
     if not clean_files:
-        print(f"Error: No .wav files found in {TEST_DATA_DIR_RAW}")
+        print(f"Error: No .wav files found. Please check the path.")
         return
 
-    # Load UrbanSound samples once
-    urban_files = glob.glob(os.path.join(URBAN_SOUND_DIR, "fold*/*.wav"))
-    urban_samples = [librosa.load(f, sr=SAMPLE_RATE, duration=AUDIO_SECONDS)[0] for f in urban_files[:10]]
+    # --- FIX --- Changed glob to be less specific.
+    urban_files_glob = os.path.join(URBAN_SOUND_DIR, "*.wav")
+    urban_files = glob.glob(urban_files_glob)
     
+    # --- DIAGNOSTIC PRINT ---
+    print(f"Found {len(urban_files)} noise audio files in '{URBAN_SOUND_DIR}'.")
+    
+    urban_samples = [librosa.load(f, sr=SAMPLE_RATE, duration=AUDIO_SECONDS)[0] for f in urban_files]
+    if not urban_samples:
+        print("Warning: No urban noise samples were loaded. The 'urban' noise type will be skipped.")
+
     noise_types = ["white", "urban", "reverb", "noise_cancellation"]
     
     for noise in noise_types:
         print(f"--- Processing noise type: {noise} ---")
         all_clean_specs, all_noisy_specs = [], []
         
-        # Directory for saving original wav files for testing
         wav_output_dir = os.path.join(TEST_DATA_DIR_PROCESSED, noise)
         os.makedirs(wav_output_dir, exist_ok=True)
         
@@ -116,7 +135,6 @@ def main():
                 clean_audio, noisy_audio = audio_data
                 clean_spec, noisy_spec = spec_data
                 
-                # Save original audio for accurate evaluation
                 sf.write(os.path.join(wav_output_dir, f"clean_{sample_count}.wav"), clean_audio, SAMPLE_RATE)
                 sf.write(os.path.join(wav_output_dir, f"noisy_{sample_count}.wav"), noisy_audio, SAMPLE_RATE)
 
@@ -127,7 +145,7 @@ def main():
         if all_clean_specs:
             np.save(os.path.join(TEST_DATA_DIR_PROCESSED, f"clean_{noise}.npy"), np.array(all_clean_specs))
             np.save(os.path.join(TEST_DATA_DIR_PROCESSED, f"noisy_{noise}.npy"), np.array(all_noisy_specs))
-            print(f"Saved {len(all_clean_specs)} samples for {noise} noise.")
+            print(f"----> Successfully saved {len(all_clean_specs)} samples for '{noise}' noise.")
 
     print("\nTest dataset creation complete.")
 

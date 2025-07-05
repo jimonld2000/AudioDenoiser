@@ -13,9 +13,9 @@ import argparse
 import random
 
 # Import the necessary components
-from new_unet_data_loader import WavToSpecDataset
-from model_unet import UNet
-from loss_unet import CombinedPerceptualLoss
+from data_loader import WavToSpecDataset
+from model import UNet
+from loss import CombinedPerceptualLoss
 
 def setup_logger(log_path):
     """Sets up a logger that outputs to a file and the console."""
